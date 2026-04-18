@@ -3064,4 +3064,3 @@ void menu_loop()
 	if(filePanel != NULL) {
 		DrawDispose(filePanel);
 	}
-}
