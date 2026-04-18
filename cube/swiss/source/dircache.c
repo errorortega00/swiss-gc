@@ -12,7 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <gccore.h>
+#include <ogc/lwp_watchdog.h>
 #include "dircache.h"
+#include "main.h"
 #include "main.h"
 
 /* ------------------------------------------------------------------ */
