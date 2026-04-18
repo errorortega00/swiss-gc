@@ -56,6 +56,9 @@
 #include "devices/filemeta.h"
 #include "dolparameters.h"
 #include "reservedarea.h"
+#include "favourites.h"
+#include "search.h"
+#include "dircache.h"
 
 DiskHeader GCMDisk;      //Gamecube Disc Header struct
 TGCHeader tgcFile;
@@ -315,8 +318,23 @@ uiDrawObj_t* renderFileBrowser(file_handle** directory, int num_files, uiDrawObj
 	while(1) {
 		u32 retraceCount = VIDEO_GetRetraceCount();
 		DrawUpdateProgressLoading(loadingBox, +1);
+		// MEJORA: Si hay búsqueda activa, filtrar antes de dibujar
+		uiDrawObj_t *searchBar = NULL;
+		file_handle **displayDir = directory;
+		int displayCount = num_files;
+		if(search_is_active()) {
+			int filteredCount = 0;
+			file_handle **filtered = search_apply_filter(
+				directory, num_files, &filteredCount);
+			if(filtered) {
+				displayDir   = filtered;
+				displayCount = filteredCount;
+			}
+		}
 		uiDrawObj_t *newPanel = DrawContainer();
-		drawFiles(directory, num_files, newPanel);
+		drawFiles(displayDir, displayCount, newPanel);
+		searchBar = search_draw_status();
+		if(displayDir != directory) free(displayDir);
 		if(filePanel != NULL) {
 			DrawDispose(filePanel);
 		}
@@ -324,7 +342,7 @@ uiDrawObj_t* renderFileBrowser(file_handle** directory, int num_files, uiDrawObj
 		DrawPublish(filePanel);
 		DrawUpdateProgressLoading(loadingBox, -1);
 		
-		u32 waitButtons = PAD_BUTTON_X|PAD_BUTTON_START|PAD_BUTTON_B|PAD_BUTTON_A|PAD_BUTTON_UP|PAD_BUTTON_DOWN|PAD_BUTTON_LEFT|PAD_BUTTON_RIGHT|PAD_TRIGGER_L|PAD_TRIGGER_R|PAD_TRIGGER_Z;
+		u32 waitButtons = PAD_BUTTON_X|PAD_BUTTON_Y|PAD_BUTTON_START|PAD_BUTTON_B|PAD_BUTTON_A|PAD_BUTTON_UP|PAD_BUTTON_DOWN|PAD_BUTTON_LEFT|PAD_BUTTON_RIGHT|PAD_TRIGGER_L|PAD_TRIGGER_R|PAD_TRIGGER_Z;
 		while ((padsStickY() > -16 && padsStickY() < 16) && !(padsButtonsHeld() & waitButtons))
 			{ VIDEO_WaitVSync (); }
 		if((padsButtonsHeld() & PAD_BUTTON_UP) || padsStickY() >= 16){	curSelection = (--curSelection < 0) ? num_files-1 : curSelection;}
@@ -412,6 +430,47 @@ uiDrawObj_t* renderFileBrowser(file_handle** directory, int num_files, uiDrawObj
 			}
 			unlockFile(directory[curSelection]);
 		}
+		
+		// MEJORA: Y sobre archivo = toggle favorito / Y en otro lado = lista favoritos
+		if(padsButtonsHeld() & PAD_BUTTON_Y) {
+			meta_thread_stop();
+			if(directory[curSelection]->fileType == IS_FILE &&
+			   canLoadFileType(directory[curSelection]->name,
+			                   devices[DEVICE_CUR]->extraExtensions)) {
+				const char *fpath = directory[curSelection]->name;
+				const char *fname = getRelativeName(directory[curSelection]->name);
+				if(favourites_contains(fpath)) {
+					favourites_remove(fpath);
+					uiDrawObj_t *m = DrawPublish(
+						DrawMessageBox(D_INFO, "Quitado de favoritos"));
+					usleep(800000);
+					DrawDispose(m);
+				} else {
+					if(favourites_add(fpath, fname)) {
+						uiDrawObj_t *m = DrawPublish(
+							DrawMessageBox(D_INFO, "Agregado a favoritos"));
+						usleep(800000);
+						DrawDispose(m);
+					}
+				}
+				while(padsButtonsHeld() & PAD_BUTTON_Y) VIDEO_WaitVSync();
+			} else {
+				favourites_show_ui();
+				while(padsButtonsHeld() & PAD_BUTTON_Y) VIDEO_WaitVSync();
+				break;
+			}
+		}
+
+		// MEJORA: L + R simultaneo = abrir teclado de busqueda
+		if((padsButtonsHeld() & PAD_TRIGGER_L) &&
+		   (padsButtonsHeld() & PAD_TRIGGER_R)) {
+			meta_thread_stop();
+			search_open_keyboard();
+			while(padsButtonsHeld() & (PAD_TRIGGER_L|PAD_TRIGGER_R))
+				VIDEO_WaitVSync();
+			break;
+		}
+
 		
 		if((padsButtonsHeld() & PAD_BUTTON_START) && swissSettings.recentListLevel > 0) {
 			meta_thread_stop();
@@ -823,6 +882,47 @@ uiDrawObj_t* renderFileFullwidth(file_handle** directory, int num_files, uiDrawO
 			}
 			unlockFile(directory[curSelection]);
 		}
+		
+		// MEJORA: Y sobre archivo = toggle favorito / Y en otro lado = lista favoritos
+		if(padsButtonsHeld() & PAD_BUTTON_Y) {
+			meta_thread_stop();
+			if(directory[curSelection]->fileType == IS_FILE &&
+			   canLoadFileType(directory[curSelection]->name,
+			                   devices[DEVICE_CUR]->extraExtensions)) {
+				const char *fpath = directory[curSelection]->name;
+				const char *fname = getRelativeName(directory[curSelection]->name);
+				if(favourites_contains(fpath)) {
+					favourites_remove(fpath);
+					uiDrawObj_t *m = DrawPublish(
+						DrawMessageBox(D_INFO, "Quitado de favoritos"));
+					usleep(800000);
+					DrawDispose(m);
+				} else {
+					if(favourites_add(fpath, fname)) {
+						uiDrawObj_t *m = DrawPublish(
+							DrawMessageBox(D_INFO, "Agregado a favoritos"));
+						usleep(800000);
+						DrawDispose(m);
+					}
+				}
+				while(padsButtonsHeld() & PAD_BUTTON_Y) VIDEO_WaitVSync();
+			} else {
+				favourites_show_ui();
+				while(padsButtonsHeld() & PAD_BUTTON_Y) VIDEO_WaitVSync();
+				break;
+			}
+		}
+
+		// MEJORA: L + R simultaneo = abrir teclado de busqueda
+		if((padsButtonsHeld() & PAD_TRIGGER_L) &&
+		   (padsButtonsHeld() & PAD_TRIGGER_R)) {
+			meta_thread_stop();
+			search_open_keyboard();
+			while(padsButtonsHeld() & (PAD_TRIGGER_L|PAD_TRIGGER_R))
+				VIDEO_WaitVSync();
+			break;
+		}
+
 		
 		if((padsButtonsHeld() & PAD_BUTTON_START) && swissSettings.recentListLevel > 0) {
 			meta_thread_stop();
@@ -2823,9 +2923,12 @@ void select_device(int type)
 void menu_loop()
 { 
 	while(padsButtonsHeld() & PAD_BUTTON_A) { VIDEO_WaitVSync (); }
+	favourites_load();   // MEJORA: cargar favoritos desde SD una sola vez
 	// We don't care if a subsequent device is "default"
 	if(needsDeviceChange) {
 		freeFiles();
+		dircache_invalidate();   // MEJORA: limpiar caché al cambiar dispositivo
+		search_clear();          // MEJORA: limpiar búsqueda activa
 		if(devices[DEVICE_CUR]) {
 			devices[DEVICE_PREV] = devices[DEVICE_CUR];
 			devices[DEVICE_CUR]->deinit(devices[DEVICE_CUR]->initial);
@@ -2946,7 +3049,11 @@ void menu_loop()
 			if((btns & PAD_BUTTON_START) && swissSettings.recentListLevel > 0) {
 				select_recent_entry();
 			}
-			while(padsButtonsHeld() & (PAD_BUTTON_B | PAD_BUTTON_A | PAD_BUTTON_RIGHT | PAD_BUTTON_LEFT | PAD_BUTTON_START)) {
+			// MEJORA: Y en menu = abrir lista de favoritos
+			if(btns & PAD_BUTTON_Y) {
+				favourites_show_ui();
+			}
+			while(padsButtonsHeld() & (PAD_BUTTON_B | PAD_BUTTON_A | PAD_BUTTON_RIGHT | PAD_BUTTON_LEFT | PAD_BUTTON_Y | PAD_BUTTON_START)) {
 				VIDEO_WaitVSync (); 
 			}
 		}
